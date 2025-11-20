@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm install:*)",
+      "Bash(pnpm build:*)",
+      "Bash(pnpm --filter @volcabulary/types build:*)",
+      "Bash(pnpm --filter @volcabulary/server build:*)",
+      "Bash(rm:*)",
+      "Bash(pnpm exec next build:*)",
+      "Bash(pnpm --filter @volcabulary/web add:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
