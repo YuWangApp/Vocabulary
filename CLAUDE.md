@@ -5,9 +5,12 @@ This document provides context and guidance for AI assistants (like Claude) work
 ## Project Overview
 
 **Volcabulary** is a full-stack TypeScript monorepo using pnpm workspaces and Turborepo. It features:
-- Next.js 14 frontend with App Router
-- Express backend with tRPC, REST, and WebSocket support
+- Next.js 14 full-stack application with App Router
+- NextAuth.js for authentication (Google OAuth + Credentials)
+- Prisma + PostgreSQL for database
+- tRPC for type-safe API routes
 - Shared TypeScript types across the monorepo
+- Chrome/Edge browser extension
 - Support for future microservices in Python, Go, etc.
 
 ## Project Structure
@@ -15,27 +18,32 @@ This document provides context and guidance for AI assistants (like Claude) work
 ```
 volcabulary/
 ├── apps/
-│   ├── web/                    # Next.js frontend (Port 3000)
+│   ├── web/                    # Next.js full-stack app (Port 3000)
 │   │   ├── src/
-│   │   │   ├── app/           # Next.js App Router pages
-│   │   │   ├── lib/           # tRPC client setup
-│   │   │   └── hooks/         # React hooks (including useWebSocket)
+│   │   │   ├── app/           # Next.js App Router pages & API routes
+│   │   │   │   ├── api/       # API endpoints (auth, trpc)
+│   │   │   │   ├── auth/      # Auth pages (signup, signin)
+│   │   │   │   └── page.tsx   # Homepage
+│   │   │   ├── server/        # Server-side code
+│   │   │   │   └── trpc/      # tRPC routers and context
+│   │   │   │       ├── routers/   # API route handlers
+│   │   │   │       ├── context.ts # Request context
+│   │   │   │       └── trpc.ts    # tRPC initialization
+│   │   │   ├── lib/           # Client utilities
+│   │   │   │   ├── trpc.ts    # tRPC client setup
+│   │   │   │   ├── auth.ts    # NextAuth configuration
+│   │   │   │   └── prisma.ts  # Prisma client
+│   │   │   └── types/         # Type definitions
 │   │   ├── package.json
 │   │   ├── tsconfig.json
 │   │   ├── tailwind.config.ts
 │   │   └── next.config.js
-│   └── server/                 # Express backend (Port 3001)
+│   └── extension/              # Browser extension
 │       ├── src/
-│       │   ├── config/        # Environment config
-│       │   ├── trpc/          # tRPC routers and context
-│       │   │   ├── routers/   # API route handlers
-│       │   │   ├── context.ts # Request context
-│       │   │   └── trpc.ts    # tRPC initialization
-│       │   ├── rest/          # REST endpoints
-│       │   ├── websocket/     # WebSocket handlers
-│       │   └── index.ts       # Server entry point
+│       │   ├── lib/           # Extension utilities
+│       │   └── components/    # UI components
 │       ├── package.json
-│       └── tsconfig.json
+│       └── manifest.json
 ├── packages/
 │   ├── config/                 # Shared tsconfig files
 │   │   ├── tsconfig.base.json
@@ -44,10 +52,13 @@ volcabulary/
 │       ├── src/index.ts       # Exported types
 │       ├── package.json
 │       └── tsconfig.json
+├── prisma/                     # Database schema & migrations
+│   └── schema.prisma
 ├── services/                   # Future microservices directory
 ├── package.json               # Root package.json with scripts
 ├── pnpm-workspace.yaml        # Workspace configuration
 ├── turbo.json                 # Turborepo configuration
+├── docker-compose.yaml        # PostgreSQL setup
 └── [documentation files]
 ```
 
@@ -56,7 +67,9 @@ volcabulary/
 - **Node.js**: >= 18.0.0
 - **Package Manager**: pnpm@8.12.1
 - **Frontend**: Next.js 14, React 18, Tailwind CSS 3
-- **Backend**: Express 4, tRPC 10, ws (WebSocket) 8
+- **Backend**: Next.js API Routes, tRPC 11
+- **Database**: Prisma 5, PostgreSQL
+- **Authentication**: NextAuth.js 4
 - **Type Safety**: TypeScript 5, Zod 3
 - **Data Fetching**: TanStack React Query 5
 - **Build Tool**: Turborepo 1.11
@@ -65,7 +78,7 @@ volcabulary/
 
 ### Package Naming
 - All internal packages use `@volcabulary/` scope
-- Apps: `@volcabulary/web`, `@volcabulary/server`
+- Apps: `@volcabulary/web`, `@volcabulary/extension`
 - Packages: `@volcabulary/types`, `@volcabulary/config`
 
 ### TypeScript Configuration
@@ -75,13 +88,13 @@ volcabulary/
 - Project references are used for cross-package type checking
 
 ### tRPC Patterns
-- Routers are in `apps/server/src/trpc/routers/`
+- Routers are in `apps/web/src/server/trpc/routers/`
 - Each domain gets its own router file (e.g., `user.ts`, `posts.ts`)
 - All routers are combined in `routers/_app.ts`
-- The `AppRouter` type is exported for client use
+- The `AppRouter` type is exported for client use and extension
 
 ### File Structure
-- Use kebab-case for file names: `use-websocket.ts`
+- Use kebab-case for file names: `use-user.ts`
 - React components can use PascalCase: `TRPCProvider.tsx`
 - Group related files in directories
 
@@ -89,23 +102,33 @@ volcabulary/
 
 ### Adding a New tRPC Endpoint
 
-1. **Create or modify a router** in `apps/server/src/trpc/routers/`:
+1. **Create or modify a router** in `apps/web/src/server/trpc/routers/`:
 ```typescript
-// apps/server/src/trpc/routers/posts.ts
+// apps/web/src/server/trpc/routers/posts.ts
 import { z } from 'zod'
-import { publicProcedure, router } from '../trpc'
+import { publicProcedure, protectedProcedure, router } from '../trpc'
+import { prisma } from '@/lib/prisma'
 
 export const postsRouter = router({
-  create: publicProcedure
+  create: protectedProcedure
     .input(z.object({ title: z.string(), content: z.string() }))
-    .mutation(({ input }) => {
-      // Implementation
-      return { id: '1', ...input }
+    .mutation(async ({ input, ctx }) => {
+      return await prisma.post.create({
+        data: {
+          ...input,
+          userId: ctx.user.id,
+        },
+      })
+    }),
+
+  list: publicProcedure
+    .query(async () => {
+      return await prisma.post.findMany()
     }),
 })
 ```
 
-2. **Register in app router** (`apps/server/src/trpc/routers/_app.ts`):
+2. **Register in app router** (`apps/web/src/server/trpc/routers/_app.ts`):
 ```typescript
 import { postsRouter } from './posts'
 
@@ -117,17 +140,41 @@ export const appRouter = router({
 
 3. **Use in frontend** (`apps/web/src/app/page.tsx` or any component):
 ```typescript
-const createPost = trpc.posts.create.useMutation()
+'use client'
+import { trpc } from '@/lib/trpc'
+
+export default function MyComponent() {
+  const createPost = trpc.posts.create.useMutation()
+  const { data: posts } = trpc.posts.list.useQuery()
+
+  return (
+    <button onClick={() => createPost.mutate({ title: 'Hello', content: 'World' })}>
+      Create Post
+    </button>
+  )
+}
 ```
 
-### Adding a New REST Endpoint
+### Adding a New REST API Endpoint
 
-Edit `apps/server/src/rest/routes.ts`:
+Create a route handler in `apps/web/src/app/api/`:
 ```typescript
-router.post('/api/custom', (req, res) => {
-  // Implementation
-  res.json({ success: true, data: {} })
-})
+// apps/web/src/app/api/custom/route.ts
+import { NextResponse } from 'next/server'
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/auth'
+
+export async function POST(req: Request) {
+  const session = await getServerSession(authOptions)
+
+  if (!session) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const body = await req.json()
+
+  return NextResponse.json({ success: true, data: body })
+}
 ```
 
 ### Adding a New Page (Next.js)
@@ -137,6 +184,24 @@ Create a new directory in `apps/web/src/app/`:
 // apps/web/src/app/about/page.tsx
 export default function AboutPage() {
   return <div>About Page</div>
+}
+```
+
+For protected pages, use session:
+```typescript
+// apps/web/src/app/dashboard/page.tsx
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/auth'
+import { redirect } from 'next/navigation'
+
+export default async function DashboardPage() {
+  const session = await getServerSession(authOptions)
+
+  if (!session) {
+    redirect('/auth/signin')
+  }
+
+  return <div>Welcome, {session.user?.name}!</div>
 }
 ```
 
@@ -157,28 +222,56 @@ Then rebuild types:
 pnpm --filter @volcabulary/types build
 ```
 
-### Adding a WebSocket Event Type
+### Adding a Database Model
 
-Edit `apps/server/src/websocket/handler.ts` to add new message type handling in the switch statement.
+1. Edit `prisma/schema.prisma`:
+```prisma
+model Post {
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+```
+
+2. Create a migration:
+```bash
+npx prisma migrate dev --name add_posts
+```
+
+3. Use in tRPC:
+```typescript
+import { prisma } from '@/lib/prisma'
+
+// In your procedure
+const posts = await prisma.post.findMany()
+```
 
 ## Development Workflow
 
 ### Starting Development
 ```bash
 pnpm install          # Install dependencies
-pnpm dev              # Run all apps
+docker-compose up -d  # Start PostgreSQL
+npx prisma generate   # Generate Prisma client
+npx prisma db push    # Push schema to database
+pnpm dev              # Run Next.js app
 ```
 
 ### Running Specific Apps
 ```bash
-pnpm --filter @volcabulary/web dev      # Frontend only
-pnpm --filter @volcabulary/server dev   # Backend only
+pnpm --filter @volcabulary/web dev         # Web app only
+pnpm --filter @volcabulary/extension dev   # Extension only
 ```
 
 ### Building
 ```bash
 pnpm build            # Build all
-pnpm --filter @volcabulary/web build    # Build specific app
+pnpm --filter @volcabulary/web build       # Build web app
+pnpm --filter @volcabulary/extension build # Build extension
 ```
 
 ### Type Checking
@@ -189,17 +282,23 @@ pnpm --filter @volcabulary/types build
 
 ## Environment Variables
 
-### Backend (`apps/server/.env`)
-```
-PORT=3001
-NODE_ENV=development
-CORS_ORIGIN=http://localhost:3000
+### Web App (`apps/web/.env.local`)
+```bash
+# Database
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/volcabulary?schema=public"
+
+# NextAuth
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=your-secret-key-here
+
+# Google OAuth (optional)
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
 ```
 
-### Frontend (`apps/web/.env.local`)
-```
-NEXT_PUBLIC_API_URL=http://localhost:3001
-NEXT_PUBLIC_WS_URL=ws://localhost:3001/ws
+To generate NEXTAUTH_SECRET:
+```bash
+openssl rand -base64 32
 ```
 
 ## Type Safety Flow
@@ -213,9 +312,9 @@ NEXT_PUBLIC_WS_URL=ws://localhost:3001/ws
              ├─────────────┬──────────────┐
              │             │              │
     ┌────────▼──────┐ ┌───▼────────┐ ┌──▼─────────┐
-    │ Server uses   │ │ tRPC infers│ │ Client uses│
-    │ types for     │ │ types from │ │ types from │
-    │ validation    │ │ routers    │ │ tRPC client│
+    │ Prisma schema │ │ tRPC infers│ │ Client uses│
+    │ generates DB  │ │ types from │ │ types from │
+    │ types         │ │ routers    │ │ tRPC client│
     └───────────────┘ └────────────┘ └────────────┘
 ```
 
@@ -224,12 +323,12 @@ NEXT_PUBLIC_WS_URL=ws://localhost:3001/ws
 ### Recommended Tools
 - **Unit Tests**: Vitest (faster than Jest)
 - **E2E Tests**: Playwright
-- **API Tests**: Supertest for REST, tRPC testing utilities
+- **API Tests**: tRPC testing utilities
 
 ### Test File Locations
 ```
 apps/web/src/**/__tests__/
-apps/server/src/**/__tests__/
+apps/extension/src/**/__tests__/
 packages/types/src/**/__tests__/
 ```
 
@@ -271,18 +370,25 @@ services/python-service/
 ## Debugging Tips
 
 ### tRPC Not Working
-- Check server is running on port 3001
-- Verify `NEXT_PUBLIC_API_URL` in frontend `.env.local`
-- Check browser console for CORS errors
-- Ensure types package is built: `pnpm --filter @volcabulary/types build`
+- Check Next.js app is running on port 3000
+- Verify tRPC endpoint exists: `http://localhost:3000/api/trpc`
+- Check browser console for errors
+- Ensure Prisma client is generated: `npx prisma generate`
 
-### WebSocket Connection Failed
-- Verify server is running
-- Check `NEXT_PUBLIC_WS_URL` environment variable
-- Ensure WebSocket path is `/ws`
-- Check browser console for connection errors
+### Authentication Issues
+- Verify `NEXTAUTH_SECRET` is set in `.env.local`
+- Check `NEXTAUTH_URL` matches your app URL
+- For Google OAuth, verify credentials are correct
+- Check session in browser DevTools: Application → Cookies
+
+### Database Connection Errors
+- Verify PostgreSQL is running: `docker ps`
+- Check `DATABASE_URL` in `.env.local`
+- Restart database: `docker-compose restart postgres`
+- View logs: `docker logs volcabulary-db`
 
 ### Type Errors
+- Regenerate Prisma client: `npx prisma generate`
 - Rebuild shared types: `pnpm --filter @volcabulary/types build`
 - Restart TypeScript server in your editor
 - Check for circular dependencies
@@ -290,7 +396,6 @@ services/python-service/
 ### Port Conflicts
 ```bash
 lsof -ti:3000 | xargs kill  # Kill process on port 3000
-lsof -ti:3001 | xargs kill  # Kill process on port 3001
 ```
 
 ## Important Files Reference
@@ -300,11 +405,15 @@ lsof -ti:3001 | xargs kill  # Kill process on port 3001
 | `package.json` (root) | Workspace scripts, shared dev dependencies |
 | `pnpm-workspace.yaml` | Defines workspace packages |
 | `turbo.json` | Build pipeline configuration |
-| `apps/server/src/index.ts` | Server entry point |
-| `apps/server/src/trpc/routers/_app.ts` | tRPC router registration |
+| `prisma/schema.prisma` | Database schema definition |
+| `apps/web/src/server/trpc/routers/_app.ts` | tRPC router registration |
 | `apps/web/src/lib/trpc.ts` | tRPC client setup |
+| `apps/web/src/lib/auth.ts` | NextAuth configuration |
+| `apps/web/src/lib/prisma.ts` | Prisma client singleton |
 | `apps/web/src/lib/trpc-provider.tsx` | React Query provider |
 | `apps/web/src/app/layout.tsx` | Root layout with providers |
+| `apps/web/src/app/api/trpc/[trpc]/route.ts` | tRPC API route handler |
+| `apps/web/src/app/api/auth/[...nextauth]/route.ts` | NextAuth API route |
 | `packages/types/src/index.ts` | Shared type definitions |
 
 ## Performance Considerations
@@ -318,36 +427,51 @@ lsof -ti:3001 | xargs kill  # Kill process on port 3001
 - Next.js automatically code-splits
 - tRPC batches requests by default
 - React Query caches data
-- WebSocket maintains single connection
+- Server components reduce client-side JavaScript
 
 ## Security Checklist
 
-- [ ] Never commit `.env` files
-- [ ] Use Zod for input validation
-- [ ] Validate WebSocket messages
-- [ ] Set appropriate CORS origins
-- [ ] Sanitize user inputs
-- [ ] Use HTTPS in production
+- [x] Never commit `.env` files (✓ gitignored)
+- [x] Use Zod for input validation (✓ tRPC)
+- [x] Set appropriate CORS origins (✓ Next.js)
+- [x] Sanitize user inputs (✓ Prisma/Zod)
+- [x] Use HTTPS in production
+- [x] Authentication implemented (✓ NextAuth.js)
 - [ ] Implement rate limiting (future)
-- [ ] Add authentication (future)
+- [ ] Add API key authentication for extension (future)
 
-## Future Enhancements Roadmap
+## Implemented Features
 
-### High Priority
-- [ ] Database integration (Prisma + PostgreSQL)
-- [ ] Authentication (NextAuth.js or Clerk)
+### Completed
+- [x] Database integration (Prisma + PostgreSQL)
+- [x] Authentication (NextAuth.js)
+- [x] Google OAuth
+- [x] Credentials authentication
+- [x] tRPC API setup
+- [x] Docker Compose for PostgreSQL
+- [x] Browser extension scaffold
+
+### In Progress
+- [ ] Extension authentication
+- [ ] User vocabulary management
+- [ ] Word lookup functionality
+
+### Future Enhancements
+
+#### High Priority
 - [ ] Error handling middleware
 - [ ] Request logging
-
-### Medium Priority
 - [ ] API rate limiting
-- [ ] API versioning
-- [ ] Input sanitization
-- [ ] Monitoring and observability
-- [ ] Docker Compose setup
+- [ ] Extension <-> Web app communication
 
-### Low Priority
-- [ ] GraphQL support
+#### Medium Priority
+- [ ] API versioning
+- [ ] Monitoring and observability
+- [ ] Automated testing suite
+- [ ] CI/CD pipeline
+
+#### Low Priority
+- [ ] GraphQL support (alternative to tRPC)
 - [ ] Message queue integration
 - [ ] Service mesh for microservices
 - [ ] Distributed tracing
@@ -355,11 +479,12 @@ lsof -ti:3001 | xargs kill  # Kill process on port 3001
 ## Questions to Ask When Making Changes
 
 1. **Does this change affect types?** → Update `packages/types` and rebuild
-2. **Is this a new API endpoint?** → Choose tRPC (preferred) or REST
-3. **Does this need real-time updates?** → Use WebSocket
-4. **Is this shared across apps?** → Consider adding to `packages/`
-5. **Is this a new service?** → Add to `services/` directory
-6. **Does this need environment config?** → Add to `.env` files and document
+2. **Is this a new API endpoint?** → Use tRPC (preferred) or REST API routes
+3. **Does this need authentication?** → Use `protectedProcedure` for tRPC or check session in API routes
+4. **Does this need database access?** → Update Prisma schema and create migration
+5. **Is this shared across apps?** → Consider adding to `packages/`
+6. **Is this a new service?** → Add to `services/` directory
+7. **Does this need environment config?** → Add to `.env.local.example` and document
 
 ## Helpful Commands
 
@@ -381,22 +506,54 @@ pnpm outdated -r
 
 # Run command in all workspaces
 pnpm -r exec <command>
+
+# Database commands
+npx prisma studio              # Open Prisma Studio
+npx prisma migrate dev         # Create and apply migration
+npx prisma migrate reset       # Reset database (careful!)
+npx prisma db push             # Push schema without migration
+npx prisma generate            # Generate Prisma client
 ```
 
 ## Communication Patterns
 
 ### Synchronous (Request/Response)
 - **tRPC**: Type-safe, recommended for all TypeScript-to-TypeScript communication
-- **REST**: For non-TypeScript clients or external APIs
+- **REST API Routes**: For webhooks, external APIs, or non-TypeScript clients
 
 ### Asynchronous (Real-time)
-- **WebSocket**: For real-time bidirectional communication (chat, notifications, live updates)
-- **Server-Sent Events**: For one-way server-to-client updates (consider for future)
+- **Server Actions**: For form submissions and mutations (Next.js 14)
+- **WebSocket**: For real-time bidirectional communication (future)
+- **Server-Sent Events**: For one-way server-to-client updates (future)
 
 ### Inter-Service
 - **HTTP/REST**: Simple service-to-service calls
 - **gRPC**: High-performance service-to-service (future)
 - **Message Queue**: Async task processing (future)
+
+## Extension Integration
+
+The browser extension connects to the web app's tRPC API:
+
+```typescript
+// apps/extension/src/lib/trpc-client.ts
+import { createTRPCProxyClient, httpBatchLink } from '@trpc/client'
+import type { AppRouter } from '@volcabulary/web/server'
+
+const API_URL = 'http://localhost:3000'
+
+export const trpc = createTRPCProxyClient<AppRouter>({
+  links: [
+    httpBatchLink({
+      url: `${API_URL}/api/trpc`,
+      headers: async () => {
+        // Add authentication headers
+        return {}
+      },
+    }),
+  ],
+})
+```
 
 ## Notes for AI Assistants
 
@@ -405,19 +562,23 @@ pnpm -r exec <command>
 3. **Respect the monorepo structure** - don't create files outside established patterns
 4. **Consider type safety first** - leverage TypeScript's full power
 5. **Document environment variables** when adding new ones
-6. **Test both tRPC and WebSocket** when making server changes
-7. **Use proper error handling** - tRPC errors, HTTP status codes, WS error messages
+6. **Test tRPC endpoints** when making server changes
+7. **Use proper error handling** - tRPC errors, HTTP status codes
 8. **Keep documentation updated** when making significant changes
+9. **Remember: Everything runs in a single Next.js app** - no separate backend server
+10. **Use Prisma for all database operations** - type-safe and migration-friendly
 
 ## Resources
 
 - [tRPC Documentation](https://trpc.io/)
 - [Next.js Documentation](https://nextjs.org/docs)
+- [NextAuth.js Documentation](https://next-auth.js.org/)
+- [Prisma Documentation](https://www.prisma.io/docs)
 - [Turborepo Documentation](https://turbo.build/repo/docs)
 - [pnpm Workspaces](https://pnpm.io/workspaces)
 - [TypeScript Project References](https://www.typescriptlang.org/docs/handbook/project-references.html)
 
 ---
 
-**Last Updated**: 2025-10-28
+**Last Updated**: 2025-11-28
 **Project Version**: 0.0.0

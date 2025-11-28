@@ -325,7 +325,7 @@ volcabulary-extension/
 
 ### Backend Integration
 
-- **Existing Backend**: Use existing `@volcabulary/server` tRPC API
+- **Existing Backend**: Use existing `@volcabulary/web` Next.js API (tRPC)
 - **New Endpoints Needed**:
   - `vocabulary.addWord` (mutation, idempotent)
   - `vocabulary.getList` (query)

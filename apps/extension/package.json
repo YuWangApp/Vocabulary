@@ -13,7 +13,6 @@
   "dependencies": {
     "@tanstack/react-query": "^5.90.5",
     "@trpc/client": "^11.7.1",
-    "@volcabulary/server": "workspace:*",
     "@volcabulary/types": "workspace:*",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

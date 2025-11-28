@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import './globals.css'
 import { TRPCProvider } from '@/lib/trpc-provider'
+import { SessionProvider } from '@/lib/session-provider'
 
 export const metadata: Metadata = {
   title: 'Volcabulary',
@@ -15,7 +16,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <TRPCProvider>{children}</TRPCProvider>
+        <SessionProvider>
+          <TRPCProvider>{children}</TRPCProvider>
+        </SessionProvider>
       </body>
     </html>
   )

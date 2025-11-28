@@ -210,7 +210,7 @@ export default defineConfig({
     "activeTab"
   ],
   "host_permissions": [
-    "http://localhost:3001/*"
+    "http://localhost:3000/*"
   ],
   "background": {
     "service_worker": "src/background/service-worker.ts",
@@ -506,15 +506,15 @@ export {} // Make this a module
 
 ```typescript
 import { createTRPCProxyClient, httpBatchLink } from '@trpc/client'
-import type { AppRouter } from '@volcabulary/server'
+import type { AppRouter } from '@volcabulary/web/server'
 
 // API URL - will use environment variable or default to localhost
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
 export const trpc = createTRPCProxyClient<AppRouter>({
   links: [
     httpBatchLink({
-      url: `${API_URL}/trpc`,
+      url: `${API_URL}/api/trpc`,
       headers: async () => {
         // Get auth token from Chrome storage if available
         try {
@@ -592,7 +592,7 @@ export const storage = {
 **File:** `apps/extension/.env`
 
 ```env
-VITE_API_URL=http://localhost:3001
+VITE_API_URL=http://localhost:3000
 ```
 
 ### Step 10.2: Create `.env.production` file
@@ -929,9 +929,9 @@ apps/extension/
 - Close and reopen the sidebar
 
 ### API calls failing
-- Make sure the backend server is running on http://localhost:3001
+- Make sure the web app is running on http://localhost:3000
 - Check `VITE_API_URL` in `.env` file
-- Check CORS settings in the backend
+- CORS is handled automatically by Next.js for same-origin requests
 \`\`\`
 
 ---
@@ -1012,8 +1012,7 @@ volcabulary/
 │   │   ├── postcss.config.js
 │   │   ├── package.json
 │   │   └── README.md
-│   ├── web/               # Existing Next.js app
-│   └── server/            # Existing Express backend
+│   └── web/               # Existing Next.js full-stack app
 ├── packages/
 │   ├── ui/                # ← NEW! (Optional)
 │   ├── types/             # Existing
@@ -1036,10 +1035,10 @@ volcabulary/
    - Enable Developer mode
    - Load `apps/extension/dist` folder
 
-3. **Start backend:**
+3. **Start web app:**
    ```bash
    # In another terminal
-   pnpm --filter @volcabulary/server dev
+   pnpm --filter @volcabulary/web dev
    ```
 
 4. **Begin development:**
