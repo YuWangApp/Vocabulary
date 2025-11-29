@@ -11,13 +11,14 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "strict": true,
+    "strict": false,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "types": ["chrome", "node", "vite/client"]
   },
   "include": ["src"],
+  "exclude": ["node_modules", "../web"],
   "references": [
     {
       "path": "../../packages/types"

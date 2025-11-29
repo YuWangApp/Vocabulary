@@ -4,7 +4,7 @@
 
 - Node.js >= 18
 - pnpm >= 8
-- (Optional) Docker for containerization
+- Docker (for PostgreSQL)
 
 ## Installation
 
@@ -18,16 +18,27 @@ pnpm install
 
 ## Development Workflow
 
-### Running All Apps
+### Starting Development
 
 ```bash
-# Run all apps in development mode (web + server)
+# Start PostgreSQL
+docker-compose up -d postgres
+
+# Generate Prisma client
+npx prisma generate
+
+# Push database schema
+npx prisma db push
+
+# Run Next.js app (includes all API routes)
 pnpm dev
 ```
 
 This starts:
-- Next.js frontend on http://localhost:3000
-- Backend server on http://localhost:3001
+- Next.js full-stack app on http://localhost:3000
+  - Frontend UI
+  - tRPC API at `/api/trpc`
+  - NextAuth at `/api/auth`
 
 ### Running Individual Apps
 
@@ -35,8 +46,8 @@ This starts:
 # Run only the web app
 pnpm --filter @volcabulary/web dev
 
-# Run only the server
-pnpm --filter @volcabulary/server dev
+# Run only the extension
+pnpm --filter @volcabulary/extension dev
 ```
 
 ### Building
@@ -47,12 +58,12 @@ pnpm build
 
 # Build specific app
 pnpm --filter @volcabulary/web build
-pnpm --filter @volcabulary/server build
+pnpm --filter @volcabulary/extension build
 ```
 
 ### Environment Variables
 
-#### Frontend (apps/web)
+#### Web App (apps/web)
 
 Copy `.env.local.example` to `.env.local`:
 
@@ -62,45 +73,46 @@ cp .env.local.example .env.local
 ```
 
 Variables:
-- `NEXT_PUBLIC_API_URL`: Backend API URL (default: http://localhost:3001)
-- `NEXT_PUBLIC_WS_URL`: WebSocket URL (default: ws://localhost:3001/ws)
+- `DATABASE_URL`: PostgreSQL connection string
+- `NEXTAUTH_URL`: Your app URL (default: http://localhost:3000)
+- `NEXTAUTH_SECRET`: Secret for NextAuth (generate with: `openssl rand -base64 32`)
+- `GOOGLE_CLIENT_ID`: Google OAuth client ID (optional)
+- `GOOGLE_CLIENT_SECRET`: Google OAuth client secret (optional)
 
-#### Backend (apps/server)
+#### Extension (apps/extension)
 
-Copy `.env.example` to `.env`:
+The extension connects to the web app's API:
 
 ```bash
-cd apps/server
+cd apps/extension
 cp .env.example .env
 ```
 
 Variables:
-- `PORT`: Server port (default: 3001)
-- `NODE_ENV`: Environment (development/production)
-- `CORS_ORIGIN`: Allowed CORS origin (default: http://localhost:3000)
+- `VITE_API_URL`: Web app URL (default: http://localhost:3000)
 
 ## Project Structure
 
 ```
 volcabulary/
 ├── apps/
-│   ├── web/              # Next.js frontend
+│   ├── web/              # Next.js full-stack app
 │   │   ├── src/
-│   │   │   ├── app/      # App router pages
-│   │   │   ├── hooks/    # React hooks
-│   │   │   └── lib/      # Utilities and tRPC client
+│   │   │   ├── app/      # App router pages & API routes
+│   │   │   ├── server/   # Server-side code (tRPC)
+│   │   │   └── lib/      # Client utilities
 │   │   └── package.json
-│   └── server/           # Backend server
+│   └── extension/        # Chrome extension
 │       ├── src/
-│       │   ├── config/   # Configuration
-│       │   ├── trpc/     # tRPC routers and context
-│       │   ├── rest/     # REST endpoints
-│       │   └── websocket/# WebSocket handlers
+│       │   ├── sidepanel/ # Extension UI
+│       │   ├── background/ # Service worker
+│       │   └── lib/       # Extension utilities
 │       └── package.json
 ├── packages/
 │   ├── config/           # Shared configurations (tsconfig, etc.)
 │   └── types/            # Shared TypeScript types
-├── services/             # Future microservices (Python, Go, etc.)
+├── prisma/               # Database schema
+│   └── schema.prisma
 └── package.json          # Root package.json
 ```
 
@@ -108,24 +120,36 @@ volcabulary/
 
 ### Adding a New tRPC Router
 
-1. Create a new router in `apps/server/src/trpc/routers/`:
+1. Create a new router in `apps/web/src/server/trpc/routers/`:
 
 ```typescript
-// apps/server/src/trpc/routers/posts.ts
+// apps/web/src/server/trpc/routers/posts.ts
 import { z } from 'zod'
-import { publicProcedure, router } from '../trpc'
+import { publicProcedure, protectedProcedure, router } from '../trpc'
+import { prisma } from '@/lib/prisma'
 
 export const postsRouter = router({
-  getAll: publicProcedure.query(() => {
-    return []
+  getAll: publicProcedure.query(async () => {
+    return await prisma.post.findMany()
   }),
+
+  create: protectedProcedure
+    .input(z.object({ title: z.string(), content: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      return await prisma.post.create({
+        data: {
+          ...input,
+          userId: ctx.user.id,
+        },
+      })
+    }),
 })
 ```
 
 2. Add it to the app router:
 
 ```typescript
-// apps/server/src/trpc/routers/_app.ts
+// apps/web/src/server/trpc/routers/_app.ts
 import { postsRouter } from './posts'
 
 export const appRouter = router({
@@ -138,21 +162,80 @@ export const appRouter = router({
 
 ```typescript
 const { data } = trpc.posts.getAll.useQuery()
+const createPost = trpc.posts.create.useMutation()
 ```
 
 ### Adding a New REST Endpoint
 
-Edit `apps/server/src/rest/routes.ts`:
+Create a route handler in `apps/web/src/app/api/`:
 
 ```typescript
-router.get('/api/custom', (req, res) => {
-  res.json({ message: 'Custom endpoint' })
-})
+// apps/web/src/app/api/custom/route.ts
+import { NextResponse } from 'next/server'
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/auth'
+
+export async function POST(req: Request) {
+  const session = await getServerSession(authOptions)
+
+  if (!session) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const body = await req.json()
+  return NextResponse.json({ success: true, data: body })
+}
 ```
 
-### Adding WebSocket Events
+### Adding a Database Model
 
-Edit `apps/server/src/websocket/handler.ts` to handle new message types.
+1. Edit `prisma/schema.prisma`:
+
+```prisma
+model Post {
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+```
+
+2. Create and apply migration:
+
+```bash
+npx prisma migrate dev --name add_posts
+```
+
+3. Use in your tRPC procedures:
+
+```typescript
+const posts = await prisma.post.findMany()
+```
+
+## Database Commands
+
+```bash
+# Open Prisma Studio to view data
+npx prisma studio
+
+# Create a new migration
+npx prisma migrate dev --name migration_name
+
+# Apply migrations
+npx prisma migrate deploy
+
+# Reset database (careful! deletes all data)
+npx prisma migrate reset
+
+# Push schema changes without migration
+npx prisma db push
+
+# Regenerate Prisma client
+npx prisma generate
+```
 
 ## Testing
 
@@ -171,30 +254,49 @@ pnpm lint
 pnpm format
 ```
 
-## Adding a New Service (Python/Go)
-
-See [services/README.md](./services/README.md) for examples.
-
 ## Troubleshooting
 
 ### Port Already in Use
 
-If ports 3000 or 3001 are in use:
+If port 3000 is in use:
 
 ```bash
 # Find and kill the process
 lsof -ti:3000 | xargs kill
-lsof -ti:3001 | xargs kill
 ```
 
 ### Type Errors
 
-Rebuild the types package:
+Rebuild the types package or regenerate Prisma client:
 
 ```bash
 pnpm --filter @volcabulary/types build
+npx prisma generate
 ```
 
-### WebSocket Connection Failed
+### Database Connection Failed
 
-Ensure the backend server is running and the WebSocket URL in `.env.local` is correct.
+```bash
+# Check if PostgreSQL is running
+docker ps
+
+# Restart PostgreSQL
+docker-compose restart postgres
+
+# View logs
+docker logs volcabulary-db
+```
+
+### Extension Not Loading
+
+1. Make sure you've built the extension: `pnpm --filter @volcabulary/extension build`
+2. Load the `apps/extension/dist` folder in Chrome (not the `src` folder)
+3. Check Chrome DevTools for errors
+
+## Development Tips
+
+1. **Use Prisma Studio** to view and edit database data visually: `npx prisma studio`
+2. **Hot reload works** for both Next.js and the extension (extension requires reload in chrome://extensions)
+3. **Check logs** in browser console and terminal for debugging
+4. **Type safety** is enforced end-to-end with tRPC
+5. **Database schema changes** require running `npx prisma migrate dev`

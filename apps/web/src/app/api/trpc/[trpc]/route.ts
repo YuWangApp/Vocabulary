@@ -1,0 +1,30 @@
+/**
+ * tRPC API Route Handler for Next.js App Router
+ *
+ * This catch-all route handles all tRPC requests at /api/trpc/*
+ * The [...trpc] folder name is a Next.js catch-all route that captures all paths.
+ *
+ * @see https://trpc.io/docs/server/adapters/nextjs
+ */
+
+import { fetchRequestHandler } from '@trpc/server/adapters/fetch'
+import { appRouter } from '@/server/trpc/routers/_app'
+import { createTRPCContext } from '@/server/trpc/context'
+
+const handler = (req: Request) =>
+  fetchRequestHandler({
+    endpoint: '/api/trpc',
+    req,
+    router: appRouter,
+    createContext: createTRPCContext,
+    onError:
+      process.env.NODE_ENV === 'development'
+        ? ({ path, error }) => {
+            console.error(
+              `❌ tRPC failed on ${path ?? '<no-path>'}: ${error.message}`
+            )
+          }
+        : undefined,
+  })
+
+export { handler as GET, handler as POST }

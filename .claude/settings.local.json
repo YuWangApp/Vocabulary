@@ -7,7 +7,10 @@
       "Bash(pnpm --filter @volcabulary/server build:*)",
       "Bash(rm:*)",
       "Bash(pnpm exec next build:*)",
-      "Bash(pnpm --filter @volcabulary/web add:*)"
+      "Bash(pnpm --filter @volcabulary/web add:*)",
+      "Bash(pnpm --filter @volcabulary/extension exec tsc:*)",
+      "Bash(pnpm --filter @volcabulary/extension build:*)",
+      "Bash(pnpm --filter @volcabulary/extension install)"
     ],
     "deny": [],
     "ask": []
